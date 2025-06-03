@@ -152,7 +152,7 @@ fn generate_spectrogram(
     let height = fft_size / 2;
     println!("num_frames: {}, height: {}", num_frames, height);
 
-    // 计算 colorbar 位置和尺寸
+    // Calculate colorbar position and dimensions
     let colorbar_x = margin_left + (num_frames as u32) + 40; // Colorbar position
     let colorbar_width = 30u32; // Colorbar width
     let colorbar_height = height as u32; // Colorbar height same as spectrogram
@@ -259,16 +259,19 @@ fn generate_spectrogram(
     // Vertical axis (frequency)
     draw_line_segment_mut(
         &mut img,
-        (margin_left as f32, 0.0),
-        (margin_left as f32, height as f32),
+        (margin_left as f32, margin_top as f32),
+        (margin_left as f32, (total_height - margin_bottom) as f32),
         black,
     );
 
     // Horizontal axis (time)
     draw_line_segment_mut(
         &mut img,
-        (margin_left as f32, height as f32),
-        (total_width as f32, height as f32),
+        (margin_left as f32, (total_height - margin_bottom) as f32),
+        (
+            (total_width - margin_right) as f32,
+            (total_height - margin_bottom) as f32,
+        ),
         black,
     );
 
@@ -325,30 +328,22 @@ fn draw_frequency_scale(
 ) {
     let freq_scale = Scale::uniform(24.0);
     let max_freq = sample_rate as f32 / 2.0;
-    let num_freq_ticks = (max_freq / 1000.0).ceil() as i32;
 
-    // Draw frequency scale (including 0 to max frequency)
-    for i in 0..=num_freq_ticks {
-        let freq = if i == num_freq_ticks {
-            max_freq // Ensure last tick is exact max frequency
-        } else {
-            i as f32 * 1000.0
-        };
+    // Calculate frequency ticks
+    let mut last_drawn_freq = -1000.0; // Initialize to a negative value to ensure the first tick (0kHz) will be drawn
 
-        let y_pos = if i == num_freq_ticks {
-            margin_top // Highest frequency corresponds to top
-        } else {
-            total_height - margin_bottom - ((freq / max_freq * height_scale) as u32) - 1
-        };
+    // Draw ticks starting from 0Hz
+    for i in (0..=(max_freq as i32)).step_by(1000) {
+        let freq = i as f32;
+        // Skip if frequency exceeds maximum
+        if freq > max_freq {
+            break;
+        }
+
+        let y_pos = total_height - margin_bottom - ((freq / max_freq * height_scale) as u32) - 1;
 
         if y_pos >= margin_top && y_pos < (total_height - margin_bottom) {
-            // For max frequency, use actual frequency value
-            let freq_text = if i == num_freq_ticks {
-                format!("{:.1}kHz", max_freq / 1000.0)
-            } else {
-                format!("{:.1}kHz", freq / 1000.0)
-            };
-
+            let freq_text = format!("{:.1}kHz", freq / 1000.0);
             draw_text_mut(
                 img,
                 Rgb([0, 0, 0]),
@@ -365,7 +360,31 @@ fn draw_frequency_scale(
                 (margin_left as f32, y_pos as f32),
                 Rgb([0, 0, 0]),
             );
+            last_drawn_freq = freq;
         }
+    }
+
+    // Check if we need to draw the highest frequency tick
+    // Only draw if the difference from the last drawn tick is >= 1kHz
+    if max_freq - last_drawn_freq >= 1000.0 {
+        // Draw highest frequency label
+        let max_freq_text = format!("{:.1}kHz", max_freq / 1000.0);
+        draw_text_mut(
+            img,
+            Rgb([0, 0, 0]),
+            50,
+            margin_top as i32 - 12,
+            freq_scale,
+            font,
+            &max_freq_text,
+        );
+        // Highest frequency tick mark
+        draw_line_segment_mut(
+            img,
+            (margin_left as f32 - 5.0, margin_top as f32),
+            (margin_left as f32, margin_top as f32),
+            Rgb([0, 0, 0]),
+        );
     }
 }
 
