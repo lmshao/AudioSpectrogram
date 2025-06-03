@@ -2,7 +2,7 @@ use clap::Parser;
 use hound::{SampleFormat, WavReader};
 use image::{ImageBuffer, Rgb};
 use imageproc::drawing::{draw_line_segment_mut, draw_text_mut};
-use rustfft::{FftPlanner, num_complex::Complex};
+use rustfft::{num_complex::Complex, FftPlanner};
 use rusttype::{Font, Scale};
 
 #[derive(Parser)]
@@ -82,6 +82,18 @@ fn compute_spectrum(samples: &[f32], fft_size: usize) -> Vec<f32> {
     spectrum[..fft_size / 2].iter().map(|c| c.norm()).collect()
 }
 
+fn get_system_font() -> Option<Vec<u8>> {
+    let font_path = if cfg!(target_os = "windows") {
+        "C:\\Windows\\Fonts\\consola.ttf"
+    } else if cfg!(target_os = "macos") {
+        "/System/Library/Fonts/Monaco.ttf"
+    } else {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
+    };
+
+    std::fs::read(font_path).ok()
+}
+
 fn generate_spectrogram(
     samples: &[f32],
     sample_rate: u32,
@@ -153,8 +165,10 @@ fn generate_spectrogram(
     }
 
     // Load font
-    let font_data: &[u8] = include_bytes!("C:\\Windows\\Fonts\\consola.ttf");
-    let font = Font::try_from_bytes(font_data).unwrap();
+    let font_data = get_system_font().expect(
+        "Could not find system font. Please ensure at least one monospace font is installed",
+    );
+    let font = Font::try_from_bytes(&font_data).expect("Invalid font file format");
 
     // Draw axes
     let black = Rgb([0, 0, 0]);
