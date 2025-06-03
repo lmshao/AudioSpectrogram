@@ -49,30 +49,59 @@ fn read_wav_samples(path: &str) -> Result<(Vec<f32>, u32), hound::Error> {
     let reader = WavReader::open(path)?;
     let sample_rate = reader.spec().sample_rate;
     let sample_format = reader.spec().sample_format;
-    println!("sample_format: {:?}", reader.spec());
+    let channels = reader.spec().channels as usize;
+    println!("Audio spec: {:?}", reader.spec());
 
-    let samples: Vec<f32> = match sample_format {
+    let mut channel_samples: Vec<Vec<f32>> = vec![Vec::new(); channels];
+
+    // First collect all channel data
+    match sample_format {
         SampleFormat::Int => {
             let samples: Vec<i32> = reader.into_samples::<i32>().map(|s| s.unwrap()).collect();
             let max_value = samples.iter().fold(0, |a, &b| a.max(b.abs()));
             println!("Original sample max value: {}", max_value);
-            samples
-                .into_iter()
-                .map(|s| s as f32 / max_value as f32)
-                .collect()
-        }
-        SampleFormat::Float => reader.into_samples::<f32>().map(|s| s.unwrap()).collect(),
-    };
 
-    // Print sample statistics
-    let max_sample = samples.iter().fold(f32::MIN, |a, &b| a.max(b.abs()));
-    let min_sample = samples.iter().fold(f32::MAX, |a, &b| a.min(b.abs()));
+            // Distribute samples to channels
+            for (i, &sample) in samples.iter().enumerate() {
+                let channel = i % channels;
+                channel_samples[channel].push(sample as f32 / max_value as f32);
+            }
+        }
+        SampleFormat::Float => {
+            let samples: Vec<f32> = reader.into_samples::<f32>().map(|s| s.unwrap()).collect();
+
+            // Distribute samples to channels
+            for (i, &sample) in samples.iter().enumerate() {
+                let channel = i % channels;
+                channel_samples[channel].push(sample);
+            }
+        }
+    }
+
+    // Merge channels (average of available channels)
+    let mut merged_samples = Vec::with_capacity(channel_samples[0].len());
+    for i in 0..channel_samples[0].len() {
+        let mut sum = 0.0;
+        let mut count = 0;
+
+        // Only use first two channels (left and right) if available
+        let channels_to_use = channels.min(2);
+        for channel in 0..channels_to_use {
+            sum += channel_samples[channel][i];
+            count += 1;
+        }
+        merged_samples.push(sum / count as f32);
+    }
+
+    // Print merged sample statistics
+    let max_sample = merged_samples.iter().fold(f32::MIN, |a, &b| a.max(b.abs()));
+    let min_sample = merged_samples.iter().fold(f32::MAX, |a, &b| a.min(b.abs()));
     println!(
-        "Normalized sample range: min={}, max={}",
+        "Merged sample range: min={}, max={}",
         min_sample, max_sample
     );
 
-    Ok((samples, sample_rate))
+    Ok((merged_samples, sample_rate))
 }
 
 fn compute_spectrum(samples: &[f32], fft_size: usize) -> Vec<f32> {
