@@ -1,7 +1,11 @@
 [package]
-name = "AudioSpectrum"
-version = "0.1.0"
+name = "AudioSpectrogram"
+version = "0.1.1"
 edition = "2024"
+authors = ["SHAO Liming <lmshao@163.com>"]
+description = "A tool for generating spectrograms from audio files"
+license = "MIT"
+repository = "https://github.com/lmshao/AudioSpectrogram"
 
 [dependencies]
 hound = "3.5"
