@@ -2,3 +2,8 @@ target/
 Cargo.lock
 *.png
 *.wav
+*.mp3
+*.flac
+*.ogg
+*.aac
+*.m4a

@@ -11,3 +11,4 @@ colorgrad = "0.6"
 imageproc = "0.23"
 rusttype = "0.9"
 clap = { version = "4.4", features = ["derive"] }
+symphonia = { version = "0.5.4", features = ["mp3", "aac", "flac", "wav", "pcm", "isomp4", "ogg", "vorbis"] }

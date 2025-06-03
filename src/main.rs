@@ -4,11 +4,19 @@ use image::{ImageBuffer, Rgb};
 use imageproc::drawing::{draw_line_segment_mut, draw_text_mut};
 use rustfft::{FftPlanner, num_complex::Complex};
 use rusttype::{Font, Scale};
+use std::fs::File;
+use std::path::Path;
+use symphonia::core::audio::SampleBuffer;
+use symphonia::core::codecs::{CODEC_TYPE_NULL, DecoderOptions};
+use symphonia::core::formats::FormatOptions;
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::MetadataOptions;
+use symphonia::core::probe::Hint;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Input WAV file path
+    /// Input audio file path (supports WAV, MP3, FLAC, OGG, AAC, etc.)
     #[arg(short, long)]
     input: String,
 
@@ -25,6 +33,111 @@ struct Args {
     hop_size: Option<usize>,
 }
 
+fn read_audio_samples(path: &str) -> Result<(Vec<f32>, u32), Box<dyn std::error::Error>> {
+    // First try to read as WAV using hound for backward compatibility
+    if path.to_lowercase().ends_with(".wav") {
+        return match read_wav_samples(path) {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                println!("WAV decoding failed, trying generic decoder: {}", e);
+                read_generic_audio(path)
+            }
+        };
+    }
+
+    // For other formats, use symphonia
+    read_generic_audio(path)
+}
+
+fn read_generic_audio(path: &str) -> Result<(Vec<f32>, u32), Box<dyn std::error::Error>> {
+    // Create a media source from the file
+    let file = File::open(path)?;
+    let media_source = MediaSourceStream::new(Box::new(file), Default::default());
+
+    // Create a hint to help the format registry guess what format reader is appropriate
+    let mut hint = Hint::new();
+    if let Some(extension) = Path::new(path).extension() {
+        hint.with_extension(extension.to_str().unwrap_or(""));
+    }
+
+    // Use the default options for format and metadata
+    let format_opts: FormatOptions = Default::default();
+    let metadata_opts: MetadataOptions = Default::default();
+
+    // Probe the media source to determine the format
+    let probed = symphonia::default::get_probe().format(
+        &hint,
+        media_source,
+        &format_opts,
+        &metadata_opts,
+    )?;
+
+    // Get the format reader
+    let mut format = probed.format;
+
+    // Find audio track
+    let track = format
+        .tracks()
+        .iter()
+        .find(|track| track.codec_params.codec != CODEC_TYPE_NULL)
+        .ok_or("No valid audio track found. If this is an OGG file, it might contain cover art.")?;
+
+    let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
+
+    // Create a decoder for the track
+    let mut decoder = match symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+    {
+        Ok(decoder) => decoder,
+        Err(e) => {
+            println!("Failed to create decoder: {}", e);
+            println!("Please ensure the correct codec features are enabled.");
+            return Err(e.into());
+        }
+    };
+
+    let mut merged_samples = Vec::new();
+
+    // Decode the audio packets
+    while let Ok(packet) = format.next_packet() {
+        // Decode the packet into audio samples
+        let decoded = decoder.decode(&packet)?;
+
+        // Get the audio buffer specification
+        let spec = *decoded.spec();
+        let num_channels = spec.channels.count();
+
+        // Create the sample buffer
+        let mut sample_buf = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
+
+        // Copy the decoded audio samples into the sample buffer
+        sample_buf.copy_interleaved_ref(decoded);
+
+        let samples = sample_buf.samples();
+
+        // Process samples in groups of channels
+        for chunk in samples.chunks(num_channels) {
+            let mut sum = 0.0;
+            let mut count = 0;
+
+            // Only use first two channels if available
+            let channels_to_use = num_channels.min(2);
+            for channel in 0..channels_to_use {
+                if let Some(&sample) = chunk.get(channel) {
+                    sum += sample;
+                    count += 1;
+                }
+            }
+
+            if count > 0 {
+                merged_samples.push(sum / count as f32);
+            }
+        }
+    }
+
+    Ok((merged_samples, sample_rate))
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -34,7 +147,8 @@ fn main() {
         format!("{}.png", stem.to_string_lossy())
     });
 
-    let (samples, sample_rate) = read_wav_samples(&args.input).expect("Failed to read WAV file");
+    let (samples, sample_rate) =
+        read_audio_samples(&args.input).expect("Failed to read audio file");
 
     let fft_size = args.fft_size;
     let hop_size = args.hop_size.unwrap_or(fft_size / 2);
@@ -93,14 +207,6 @@ fn read_wav_samples(path: &str) -> Result<(Vec<f32>, u32), hound::Error> {
         merged_samples.push(sum / count as f32);
     }
 
-    // Print merged sample statistics
-    let max_sample = merged_samples.iter().fold(f32::MIN, |a, &b| a.max(b.abs()));
-    let min_sample = merged_samples.iter().fold(f32::MAX, |a, &b| a.min(b.abs()));
-    println!(
-        "Merged sample range: min={}, max={}",
-        min_sample, max_sample
-    );
-
     Ok((merged_samples, sample_rate))
 }
 
@@ -108,10 +214,10 @@ fn compute_spectrum(samples: &[f32], fft_size: usize) -> Vec<f32> {
     let mut planner = FftPlanner::new();
     let fft = planner.plan_fft_forward(fft_size);
 
-    // Check input samples
-    let sample_max = samples.iter().fold(f32::MIN, |a, &b| a.max(b.abs()));
-    let sample_min = samples.iter().fold(f32::MAX, |a, &b| a.min(b.abs()));
-    println!("Input sample range: min={}, max={}", sample_min, sample_max);
+    // // Check input samples
+    // let sample_max = samples.iter().fold(f32::MIN, |a, &b| a.max(b.abs()));
+    // let sample_min = samples.iter().fold(f32::MAX, |a, &b| a.min(b.abs()));
+    // println!("Input sample range: min={}, max={}", sample_min, sample_max);
 
     // 1. Apply Hanning window and convert to complex input
     let window: Vec<f32> = (0..fft_size)
@@ -126,24 +232,11 @@ fn compute_spectrum(samples: &[f32], fft_size: usize) -> Vec<f32> {
         .map(|(s, w)| Complex::new(s * w, 0.0))
         .collect();
 
-    // Check windowed values
-    let windowed_max = input.iter().fold(f32::MIN, |a, b| a.max(b.norm()));
-    let windowed_min = input.iter().fold(f32::MAX, |a, b| a.min(b.norm()));
-    println!("Windowed range: min={}, max={}", windowed_min, windowed_max);
-
     // 2. Perform FFT
     fft.process(&mut input);
 
     // 3. Compute magnitude spectrum
     let spectrum: Vec<f32> = input[..fft_size / 2].iter().map(|c| c.norm()).collect();
-
-    // Check spectrum values
-    let spectrum_max = spectrum.iter().fold(f32::MIN, |a, &b| a.max(b));
-    let spectrum_min = spectrum.iter().fold(f32::MAX, |a, &b| a.min(b));
-    println!(
-        "Spectrum value range: min={}, max={}",
-        spectrum_min, spectrum_max
-    );
 
     spectrum
 }
@@ -466,7 +559,7 @@ fn draw_time_scale(
     }
 }
 
-// 新增：绘制分贝色度条和刻度
+// Draw colorbar with scale
 fn draw_colorbar_with_scale(
     img: &mut ImageBuffer<Rgb<u8>, Vec<u8>>,
     font: &Font,
