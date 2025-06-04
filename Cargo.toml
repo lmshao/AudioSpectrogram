@@ -19,3 +19,4 @@ symphonia = { version = "0.5.4", features = ["mp3", "aac", "flac", "wav", "pcm",
 
 [build-dependencies]
 chrono = "0.4.41"
+embed-resource = "3.0.3"
