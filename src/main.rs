@@ -13,6 +13,10 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
+mod build_time {
+    include!(concat!(env!("OUT_DIR"), "/build_time.rs"));
+}
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -138,33 +142,12 @@ fn read_generic_audio(path: &str) -> Result<(Vec<f32>, u32), Box<dyn std::error:
     Ok((merged_samples, sample_rate))
 }
 
-fn main() {
-    let args = Args::parse();
-
-    let output_path = args.output.unwrap_or_else(|| {
-        let input_path = std::path::Path::new(&args.input);
-        let stem = input_path.file_stem().unwrap_or_default();
-        format!("{}.png", stem.to_string_lossy())
-    });
-
-    let (samples, sample_rate) =
-        read_audio_samples(&args.input).expect("Failed to read audio file");
-
-    let fft_size = args.fft_size;
-    let hop_size = args.hop_size.unwrap_or(fft_size / 2);
-
-    let spectrogram = generate_spectrogram(&samples, sample_rate, fft_size, hop_size);
-
-    spectrogram.save(&output_path).unwrap();
-    println!("Spectrogram saved to: {}", output_path);
-}
-
 fn read_wav_samples(path: &str) -> Result<(Vec<f32>, u32), hound::Error> {
     let reader = WavReader::open(path)?;
     let sample_rate = reader.spec().sample_rate;
     let sample_format = reader.spec().sample_format;
     let channels = reader.spec().channels as usize;
-    println!("Audio spec: {:?}", reader.spec());
+    println!("{:?}", reader.spec());
 
     let mut channel_samples: Vec<Vec<f32>> = vec![Vec::new(); channels];
 
@@ -173,7 +156,6 @@ fn read_wav_samples(path: &str) -> Result<(Vec<f32>, u32), hound::Error> {
         SampleFormat::Int => {
             let samples: Vec<i32> = reader.into_samples::<i32>().map(|s| s.unwrap()).collect();
             let max_value = samples.iter().fold(0, |a, &b| a.max(b.abs()));
-            println!("Original sample max value: {}", max_value);
 
             // Distribute samples to channels
             for (i, &sample) in samples.iter().enumerate() {
@@ -214,11 +196,6 @@ fn compute_spectrum(samples: &[f32], fft_size: usize) -> Vec<f32> {
     let mut planner = FftPlanner::new();
     let fft = planner.plan_fft_forward(fft_size);
 
-    // // Check input samples
-    // let sample_max = samples.iter().fold(f32::MIN, |a, &b| a.max(b.abs()));
-    // let sample_min = samples.iter().fold(f32::MAX, |a, &b| a.min(b.abs()));
-    // println!("Input sample range: min={}, max={}", sample_min, sample_max);
-
     // 1. Apply Hanning window and convert to complex input
     let window: Vec<f32> = (0..fft_size)
         .map(|i| {
@@ -236,9 +213,7 @@ fn compute_spectrum(samples: &[f32], fft_size: usize) -> Vec<f32> {
     fft.process(&mut input);
 
     // 3. Compute magnitude spectrum
-    let spectrum: Vec<f32> = input[..fft_size / 2].iter().map(|c| c.norm()).collect();
-
-    spectrum
+    input[..fft_size / 2].iter().map(|c| c.norm()).collect()
 }
 
 fn get_system_font() -> Option<Vec<u8>> {
@@ -272,7 +247,7 @@ fn generate_spectrogram(
         0
     };
     let height = fft_size / 2;
-    println!("num_frames: {}, height: {}", num_frames, height);
+    // println!("num_frames: {}, height: {}", num_frames, height);
 
     // Calculate colorbar position and dimensions
     let colorbar_x = margin_left + (num_frames as u32) + 40; // Colorbar position
@@ -299,29 +274,6 @@ fn generate_spectrogram(
         let spectrum = compute_spectrum(chunk, fft_size);
         all_magnitudes.extend(spectrum);
     }
-
-    println!("all_magnitudes len: {}", all_magnitudes.len());
-
-    // Calculate logarithmic spectrum values
-    let log_magnitudes: Vec<f32> = all_magnitudes
-        .iter()
-        .map(|&x| if x > 1e-10 { x.log10() } else { -10.0 })
-        .collect();
-
-    let max_magnitude = log_magnitudes.iter().fold(f32::MIN, |a, &b| a.max(b));
-    let min_magnitude = log_magnitudes.iter().fold(f32::MAX, |a, &b| a.min(b));
-    println!(
-        "Log spectrum value range: min={}, max={}",
-        min_magnitude, max_magnitude
-    );
-
-    // Check if all spectrum values are zero or very close to zero
-    let non_zero_count = all_magnitudes.iter().filter(|&&x| x > 1e-10).count();
-    println!(
-        "Non-zero spectrum value count: {} / {}",
-        non_zero_count,
-        all_magnitudes.len()
-    );
 
     // Draw spectrogram body
     for (x, i) in (0..num_frames).enumerate() {
@@ -350,14 +302,6 @@ fn generate_spectrogram(
 
             let color = gradient.at(normalized as f64).to_rgba8();
             let y_pos = total_height - margin_bottom - (y as u32) - 1;
-
-            // Check the color value of the first pixel
-            if x == 0 && y == 0 {
-                println!(
-                    "Color mapping - normalized: {}, color: R:{}, G:{}, B:{}",
-                    normalized, color[0], color[1], color[2]
-                );
-            }
 
             // Only draw within valid spectrogram area
             if y_pos >= margin_top && y_pos < (total_height - margin_bottom) {
@@ -627,8 +571,6 @@ fn draw_colorbar_with_scale(
     let db_start = db_min;
     let db_end = db_max;
 
-    println!("dB scale range: {} dB to {} dB", db_start, db_end);
-
     // Calculate dB values
     let mut db_values: Vec<f32> = Vec::new();
     let mut current_db = db_start;
@@ -668,4 +610,32 @@ fn draw_colorbar_with_scale(
             );
         }
     }
+}
+
+fn main() {
+    println!("Program : {}", env!("CARGO_PKG_NAME"));
+    println!("Version : {}", env!("CARGO_PKG_VERSION"));
+    println!("Author  : {}", env!("CARGO_PKG_AUTHORS"));
+    println!("Built   : {}", build_time::BUILD_TIME);
+    println!("─────────────────────────────────────────────────");
+
+    let args = Args::parse();
+
+    let output_path = args.output.unwrap_or_else(|| {
+        let input_path = std::path::Path::new(&args.input);
+        let stem = input_path.file_stem().unwrap_or_default();
+        format!("{}.png", stem.to_string_lossy())
+    });
+
+    let (samples, sample_rate) =
+        read_audio_samples(&args.input).expect("Failed to read audio file");
+
+    let fft_size = args.fft_size;
+    let hop_size = args.hop_size.unwrap_or(fft_size / 2);
+
+    println!("Generating spectrogram...");
+    let spectrogram = generate_spectrogram(&samples, sample_rate, fft_size, hop_size);
+
+    spectrogram.save(&output_path).unwrap();
+    println!("Spectrogram saved to: {}", output_path);
 }
