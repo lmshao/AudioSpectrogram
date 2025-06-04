@@ -21,8 +21,12 @@ mod build_time {
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Input audio file path (supports WAV, MP3, FLAC, OGG, AAC, etc.)
-    #[arg(short, long)]
-    input: String,
+    #[arg(short, long, value_name = "FILE")]
+    input: Option<String>,
+
+    /// Input audio file (position argument, for drag-and-drop support)
+    #[arg(value_name = "INPUT_FILE")]
+    input_file: Option<String>,
 
     /// Output spectrogram file path
     #[arg(short, long)]
@@ -620,15 +624,18 @@ fn main() {
     println!("─────────────────────────────────────────────────");
 
     let args = Args::parse();
+    
+    let input_path = args.input.or(args.input_file)
+        .expect("No input file specified. Use -i option or drag-and-drop a file.");
 
     let output_path = args.output.unwrap_or_else(|| {
-        let input_path = std::path::Path::new(&args.input);
+        let input_path = std::path::Path::new(&input_path);
         let stem = input_path.file_stem().unwrap_or_default();
         format!("{}.png", stem.to_string_lossy())
     });
 
     let (samples, sample_rate) =
-        read_audio_samples(&args.input).expect("Failed to read audio file");
+        read_audio_samples(&input_path).expect("Failed to read audio file");
 
     let fft_size = args.fft_size;
     let hop_size = args.hop_size.unwrap_or(fft_size / 2);
