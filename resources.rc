@@ -19,10 +19,10 @@ BEGIN
             VALUE "FileDescription", "Audio Spectrogram Generator - A tool for generating high-quality spectrograms from audio files"
             VALUE "FileVersion", "0.1.1.0"
             VALUE "InternalName", "AudioSpectrogram"
-            VALUE "LegalCopyright", "Copyright (C) 2024 SHAO Liming. All rights reserved."
+            VALUE "LegalCopyright", "Copyright (C) 2025 SHAO Liming. All rights reserved."
             VALUE "OriginalFilename", "AudioSpectrogram.exe"
             VALUE "ProductName", "Audio Spectrogram Generator"
-            VALUE "ProductVersion", "0.1.1.0"
+            VALUE "ProductVersion", "0.1.1"
             VALUE "Comments", "Supports WAV, MP3, FLAC, OGG, AAC and other audio formats"
             VALUE "Website", "https://github.com/lmshao/AudioSpectrogram"
         END
